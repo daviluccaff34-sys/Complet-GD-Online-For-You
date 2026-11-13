@@ -101,6 +101,33 @@ Do not change the root `CMakeLists.txt` yet. Before adding the Argon dependency,
 
 This is an upstream-documentation review and architecture update only. Argon has not yet been added to the project's CMake configuration, no authentication UI or C++ integration has been written, and nothing has been compiled or tested on Android.
 
+
+## Verified Geode / Argon build integration
+
+The exact Geode SDK tag `v5.11.2` was inspected. Its root `CMakeLists.txt` includes `cmake/CPM.cmake`, uses CPM-managed dependencies, and declares Geometry Dash version `2.2081` for Android. The SDK's CMake minimum is 3.25, so this project now declares CMake 3.25 as its minimum too.
+
+The official Argon README documents this pinned dependency pattern:
+
+```cmake
+CPMAddPackage("gh:GlobedGD/argon@1.5.1")
+target_link_libraries(${PROJECT_NAME} argon)
+```
+
+Argon's CMake project defines a static C++ library named `argon`, exposes its `include` directory, links against `geode-sdk`, and does not contain platform-specific exclusions in the reviewed CMake file. The dependency is added after the Geode SDK's `add_subdirectory`, following the same general CPM ordering used by the Globed project.
+
+### Repository change
+
+The root `CMakeLists.txt` now:
+- Requires CMake 3.25.
+- Adds the pinned Argon 1.5.1 package through CPM after loading the Geode SDK.
+- Links the mod target against `argon`.
+
+This is a source/configuration change only. It has not been configured or compiled, so Android ABI compatibility is not yet proven by a build. The next verification step is to inspect the exact Argon 1.5.1 tag contents and then run non-release validation/build checks only after the project owner approves that stage.
+
+### Safer server-side token validation
+
+Argon's server API documents `POST /v1/validation/check-data-many`, which accepts account ID and token in a JSON request body and returns validated account ID, user ID, and username. Prefer this endpoint for the Worker rather than placing the token in a GET query string. The Worker must redact request bodies and never log the token. Check for HTTP 200 and require the returned `valid` field to be exactly true before issuing a project session.
+
 ## Implementation status
 
 Architecture only. No Worker, D1 database, Gemini API request, authentication, or mod chat UI has been implemented or tested yet. Do not treat this document as a deployed service.
