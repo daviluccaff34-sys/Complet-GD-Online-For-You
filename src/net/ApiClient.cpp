@@ -95,9 +95,9 @@ void createRoom(ApiCallback callback) {
 }
 
 void getRoomState(std::string roomId, int sinceRevision, ApiCallback callback) {
-    auto request = authorizedRequest().get(url("/api/rooms/" + roomId + "/state"));
+    auto request = authorizedRequest();
     request.param("since", std::to_string(sinceRevision));
-    async::spawn(std::move(request), [callback = std::move(callback)](web::WebResponse response) mutable {
+    async::spawn(request.get(url("/api/rooms/" + roomId + "/state")), [callback = std::move(callback)](web::WebResponse response) mutable {
         parseResponse(std::move(response), std::move(callback));
     });
 }
