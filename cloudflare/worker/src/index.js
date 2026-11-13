@@ -300,8 +300,20 @@ export default {
       }
       return withCors(response, request, env);
     } catch (error) {
-      const status = error?.message === "REQUEST_TOO_LARGE" ? 413 : 400;
-      return withCors(json({ error: status === 413 ? "Requisição muito grande." : "Não foi possível processar a requisição." }, status), request, env);
+      const status = error?.message === "REQUEST_TOO_LARGE" ? 413 :
+        (String(error?.message || "").startsWith("INVALID_") ||
+         ["EMPTY_CHAT_MESSAGE", "LEVEL_OBJECT_NOT_FOUND", "ROOM_OBJECT_LIMIT"].includes(error?.message)) ? 400 : 500;
+      console.error(JSON.stringify({
+        message: "request_failed",
+        path,
+        status,
+        errorName: error?.name || "Error"
+      }));
+      return withCors(json({
+        error: status === 413 ? "Requisição muito grande." :
+          status === 400 ? "Dados inválidos para esta operação." :
+          "Erro interno do servidor."
+      }, status), request, env);
     }
   }
 };
