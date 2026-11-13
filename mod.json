@@ -1,0 +1,11 @@
+{
+  "geode": "v5.11.2",
+  "gd": {
+    "android": "2.2081"
+  },
+  "id": "davilucca.complet-gd-online-for-you",
+  "name": "Complet GD Online For You!",
+  "version": "v0.1.0",
+  "developer": "Davi",
+  "description": "Online features and collaborative tools for Geometry Dash."
+}
