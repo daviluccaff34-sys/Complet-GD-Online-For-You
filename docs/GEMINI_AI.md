@@ -1,133 +1,69 @@
-# Gemini AI architecture
+# Gemini AI and account architecture
 
-## Product behavior
+## Behavior
 
-Gemini AI is a general-purpose conversational assistant available throughout the Geode mod, not only inside the level editor. It can also help with Geometry Dash topics such as triggers, groups, editor workflows, and gameplay.
+Gemini is a general-purpose assistant available from the mod hub, not only inside the level editor. It should answer ordinary conversation naturally and help with Geometry Dash topics such as triggers, groups, editor workflows, objects and gameplay. Conversation history is stored in D1 and scoped to the authenticated Geometry Dash account.
 
-Conversation history is stored in the cloud and remains available across sessions.
+## Client-to-server flow
 
-## Request flow
+1. The mod calls Argon from the game thread and receives an authentication token asynchronously.
+2. The mod sends the token and account ID to the Cloudflare Worker over HTTPS.
+3. The Worker validates them with the official Argon endpoint.
+4. The Worker creates an internal player record and a random project session. Only a SHA-256 hash of the project session is stored in D1.
+5. The mod sends the project session as a Bearer token for later API requests.
+6. The Worker loads only the authenticated player's conversation history and calls Gemini using a server-side secret.
 
-1. The Geode mod sends a chat request to the project's Cloudflare Worker.
-2. The Worker authenticates the player and checks request limits.
-3. The Worker loads the conversation history permitted for that player.
-4. The Worker calls the Google Gemini API using a server-side secret.
-5. The Worker stores the user message and assistant reply.
-6. The Worker returns the reply and conversation identifier to the mod.
+The mod never asks the player to type their Geometry Dash password or GJP. The raw Argon token is not stored in D1 or written to logs. The project session currently remains in memory for the running mod and expires after seven days on the server.
 
-The Gemini API key must never be embedded in the APK, mod source, or public GitHub repository.
+## Argon validation
 
-## Cloudflare responsibilities
+The pinned client library is GlobedGD/argon v1.5.1. Its header defines argon::AccountData with account ID, user ID, username and private login data. The wrapper exposes only the account ID, user ID, username and the asynchronous token result; it does not expose the full AccountData object to the UI.
 
-- Workers: authenticated API endpoints and Gemini proxy.
-- D1: structured player conversations and message history.
-- Secrets: Gemini API key.
-- R2: optional later use for attachments; not needed for text-only chat.
+The Worker currently calls the documented Argon endpoint:
 
-## Initial API contract
+- GET https://argon.globed.dev/v1/validation/check
+- Query parameters: account_id and authtoken
+- Sign-in is accepted only when the HTTP response succeeds and JSON valid is exactly true.
 
-- `POST /api/ai/chat`: send a message and receive a reply.
-- `GET /api/ai/conversations`: list the authenticated player's conversations.
-- `GET /api/ai/conversations/:id`: retrieve one conversation belonging to the authenticated player.
-- `DELETE /api/ai/conversations/:id`: delete one of the authenticated player's conversations (future UI capability).
+The token is sent only to Argon's HTTPS endpoint. Never log the validation URL or token. Fail closed on timeouts, invalid responses, non-success HTTP status or invalid tokens.
 
-Every endpoint must derive the player identity from a verified session/token. It must not trust a player ID supplied only in the request body or URL.
+## Worker endpoints
 
-## Data model draft
+- POST /api/auth/argon
+- POST /api/ai/chat
+- GET /api/ai/conversations
+- GET /api/ai/conversations/:id
+- POST /api/rooms
+- GET /api/rooms/:roomId/state?since=<revision>
+- POST /api/rooms/:roomId/events
+- GET /api/storage/files
+- POST /api/storage/upload
 
-- `players`: stable internal player identity and account metadata.
-- `conversations`: conversation ID, player ID, title, created time, updated time.
-- `messages`: message ID, conversation ID, role, content, created time.
+All endpoints except health and Argon sign-in require a valid project session. Player identity is derived from the session, never from a client-supplied account ID.
 
-Conversation and message queries must always be scoped to the authenticated player. Apply message length limits, rate limits, safe error handling, and retention limits before public launch.
+## Gemini
 
-## Geometry Dash account authentication
+The Worker calls Gemini's gemini-2.5-flash generateContent endpoint. Set GEMINI_API_KEY as a Cloudflare Worker secret; never put it in mod.json, C++, GitHub Actions logs or the public repository. The prompt asks the assistant to speak naturally, prefer the player's language, explain GD concepts step by step and admit uncertainty.
 
-The selected account identity is the player's existing Geometry Dash account. The mod should integrate the Argon authentication library from Globed rather than asking the player to type their Geometry Dash password into this project's UI or sending a password/GJP to the project's Cloudflare services.
+The initial client UI keeps one conversation ID in memory while the hub remains open. D1 stores the conversation and message history. Conversation listing and retrieval endpoints exist for the next history-screen iteration.
 
-Proposed flow:
+## Cloudflare services
 
-1. The mod starts Argon authentication using the supported library flow.
-2. The mod receives the Argon authentication token and the associated Geometry Dash account ID from the authentication result.
-3. The mod sends the token to the project's Cloudflare Worker over HTTPS.
-4. The Worker validates the token against the Argon validation API and confirms it matches the supplied account ID.
-5. Only after successful validation, the Worker maps the account ID to an internal player record and issues a short-lived project session.
-6. The Worker stores conversations under that internal player record. The raw Argon token must not be stored in D1 or logs.
+- Workers: API and Gemini proxy.
+- D1: player records, hashed sessions, conversations, messages and file metadata.
+- Durable Objects: per-room state, member presence, event revisions and shared editor-operation transport.
+- R2: private per-player file objects.
 
-The Worker must never trust an account ID on its own. Every session must be bound to a validated Geometry Dash account, and every conversation query must be scoped to that session. If Argon validation is unavailable, sign-in must fail closed rather than silently accepting an unverified ID.
+The Worker enforces a 100 MB application upload limit. The initial UI uploads a text note as a smoke-test path; native level-file import/export, download and deletion are not implemented yet.
 
-This is a proposed integration, not yet implemented. Before coding, review Argon's current Android/Geode integration instructions, license, token lifecycle, and server validation contract.
+## Prototype boundaries and next work
 
-## Decisions still required
+- Room communication uses authenticated HTTP polling every two seconds. A persistent native WebSocket client is not connected yet.
+- The shared editor stores generic JSON marker objects; it is not integrated with Geometry Dash's native editor object model or level serialization.
+- The prototype does not synchronize actual live player movement or gameplay state.
+- Add room invite permissions, ownership, moderation, rate limits, quotas and stronger validation before public launch.
+- Add native level import/export and a full file browser.
+- Add a persistent conversation list and delete-history controls.
+- Deploy Worker, D1, R2 and Durable Object bindings, then set the real workers.dev URL in src/net/ApiClient.hpp.
 
-- Exact Gemini model and API version.
-- Exact Gemini model and API version.
-- Whether the player can clear individual conversations or all history.
-- Usage limits and handling when Gemini is unavailable.
-
-
-## Argon Android / Geode integration review
-
-The official Argon client is a C++ library intended to be linked into the Geode mod; users do not need to install a separate dependency mod. The upstream README currently documents this CMake dependency:
-
-```cmake
-CPMAddPackage("gh:GlobedGD/argon@1.5.1")
-target_link_libraries(${PROJECT_NAME} argon)
-```
-
-The client authentication entry point is `argon::startAuth()`, which resolves asynchronously to a `Result<std::string>` containing the Argon auth token. In Geode, the documented pattern uses `async::spawn` or an `async::TaskHolder`; do not block the game thread while authentication is running. Include `<argon/argon.hpp>`. If token/session validation fails, Argon documents `argon::clearToken()` as the recovery action before retrying authentication.
-
-### Server validation
-
-The Cloudflare Worker must validate the received token with the official Argon server at `https://argon.globed.dev/v1`. The basic endpoint is `GET /validation/check`, with `account_id` and `authtoken`; accept sign-in only when the HTTP status is successful and the JSON field `valid` is exactly true. Treat non-200 responses, rate limits, malformed JSON, timeouts, and unavailable Argon service as authentication failures. Never log the token, the full validation URL, or request bodies containing it.
-
-If the project later needs the canonical Geometry Dash username and user ID, review Argon's `POST /validation/check-data-many` endpoint; its response includes the account ID, user ID, and username embedded in the validated token. Do not trust a username or user ID supplied only by the mod client.
-
-### Session and privacy rules
-
-- After successful Argon validation, issue the project's own short-lived session token.
-- Store only the validated account identity and the project's session data in D1; do not persist the Argon token.
-- Store a hash of the project's session token rather than its raw value where practical.
-- Revalidate only when needed; use the project's own session to avoid calling Argon on every chat request.
-- Never accept a player/account ID as proof of identity without a valid project session.
-- Do not include tokens in logs, analytics, error reports, or client-visible messages.
-- Use HTTPS for all requests and fail closed if validation cannot be completed.
-
-### Remaining integration checks
-
-The dependency declaration is now committed, but the exact Argon 1.5.1 tag has not yet been independently fetched for source-by-source review, and no Android configure/build has been run. Confirm the dependency resolves to the intended release and supports the selected Android ABI before treating the integration as build-verified.
-
-### Current status
-
-Argon is now declared and linked in the root CMake configuration. No authentication UI, C++ login flow, Cloudflare Worker, D1 database, or Gemini API request has been implemented. Nothing has been configured, compiled, or tested on Android.
-
-
-## Verified Geode / Argon build integration
-
-The exact Geode SDK tag `v5.11.2` was inspected. Its root `CMakeLists.txt` includes `cmake/CPM.cmake`, uses CPM-managed dependencies, and declares Geometry Dash version `2.2081` for Android. The SDK's CMake minimum is 3.25, so this project now declares CMake 3.25 as its minimum too.
-
-The official Argon README documents this pinned dependency pattern:
-
-```cmake
-CPMAddPackage("gh:GlobedGD/argon@1.5.1")
-target_link_libraries(${PROJECT_NAME} argon)
-```
-
-Argon's CMake project defines a static C++ library named `argon`, exposes its `include` directory, links against `geode-sdk`, and does not contain platform-specific exclusions in the reviewed CMake file. The dependency is added after the Geode SDK's `add_subdirectory`, following the same general CPM ordering used by the Globed project.
-
-### Repository change
-
-The root `CMakeLists.txt` now:
-- Requires CMake 3.25.
-- Adds the pinned Argon 1.5.1 package through CPM after loading the Geode SDK.
-- Links the mod target against `argon`.
-
-This is a source/configuration change only. It has not been configured or compiled, so Android ABI compatibility is not yet proven by a build. The next verification step is to inspect the exact Argon 1.5.1 tag contents and then run non-release validation/build checks only after the project owner approves that stage.
-
-### Safer server-side token validation
-
-Argon's server API documents `POST /v1/validation/check-data-many`, which accepts account ID and token in a JSON request body and returns validated account ID, user ID, and username. Prefer this endpoint for the Worker rather than placing the token in a GET query string. The Worker must redact request bodies and never log the token. Check for HTTP 200 and require the returned `valid` field to be exactly true before issuing a project session.
-
-## Implementation status
-
-The Argon CMake dependency and an initial C++ authentication wrapper are committed. The wrapper is not connected to a UI and does not call the Worker yet. Worker, D1, Gemini requests, and chat UI are not implemented. Nothing has been configured, compiled, or deployed.
+No Android build or live Cloudflare test has been run yet. Source-level integration is not the same as a tested release.
