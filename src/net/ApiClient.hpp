@@ -21,5 +21,6 @@ void getRoomState(std::string roomId, int sinceRevision, ApiCallback callback);
 void sendRoomChat(std::string roomId, std::string message, ApiCallback callback);
 void sendLevelOperation(std::string roomId, matjson::Value operation, ApiCallback callback);
 void listCloudFiles(ApiCallback callback);
+void uploadCloudText(std::string fileName, std::string content, ApiCallback callback);
 
 } // namespace cgdof::net
