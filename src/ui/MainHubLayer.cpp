@@ -15,6 +15,7 @@ protected:
     std::string m_roomId;
     std::string m_conversationId;
     int m_revision = 0;
+    bool m_polling = false;
 
     void setStatus(std::string const& value) {
         if (m_status) m_status->setString(value.c_str());
@@ -54,6 +55,8 @@ protected:
             if (ok) {
                 m_roomId = data["roomId"].asString().unwrapOr("");
                 setStatus("Sala criada: " + m_roomId + " | Compartilhe o código!");
+                schedule(schedule_selector(MainHubLayer::onPollRoom), 2.0f);
+                refreshRoom();
             } else setStatus("Sala: " + error.substr(0, 90));
             release();
         });
@@ -69,12 +72,16 @@ protected:
             setStatus("Digite um código de sala válido.");
             return;
         }
+        schedule(schedule_selector(MainHubLayer::onPollRoom), 2.0f);
         refreshRoom();
     }
 
     void refreshRoom() {
+        if (m_polling || m_roomId.empty()) return;
+        m_polling = true;
         retain();
         cgdof::net::getRoomState(m_roomId, m_revision, [this](bool ok, matjson::Value data, std::string error) {
+            m_polling = false;
             if (!ok) {
                 setStatus("Sala: " + error.substr(0, 90));
             } else {
@@ -83,9 +90,12 @@ protected:
                 auto count = members.isOk() ? members.unwrap().size() : 0;
                 auto events = data["events"].asArray();
                 auto eventCount = events.isOk() ? events.unwrap().size() : 0;
+                auto stateObjects = data["state"]["objects"].asArray();
+                auto objectCount = stateObjects.isOk() ? stateObjects.unwrap().size() : 0;
                 setStatus("Sala " + m_roomId + " | Jogadores: " + std::to_string(count) +
-                    " | Novas atualizações: " + std::to_string(eventCount) +
-                    " | Revisão: " + std::to_string(m_revision));
+                    " | Objetos compartilhados: " + std::to_string(objectCount) +
+                    " | Eventos novos: " + std::to_string(eventCount) +
+                    " | Rev. " + std::to_string(m_revision));
             }
             release();
         });
@@ -237,8 +247,13 @@ public:
         addButton("ENVIAR EDICAO", right, bottom, menu_selector(MainHubLayer::onSendEdit));
         addButton("PERGUNTAR IA", mid, size.height * 0.055f, menu_selector(MainHubLayer::onAskAI));
         addButton("NUVEM", right, size.height * 0.055f, menu_selector(MainHubLayer::onCloud));
+        addButton("SALVAR NOTA", left, size.height * 0.055f, menu_selector(MainHubLayer::onCloudUpload));
         addButton("VOLTAR", left, size.height * 0.055f, menu_selector(MainHubLayer::onBack));
         return true;
+    }
+
+    void onPollRoom(float) {
+        refreshRoom();
     }
 
     void onRefreshRoom(CCObject*) {
@@ -246,7 +261,24 @@ public:
         if (m_roomId.empty()) setStatus("Crie ou entre em uma sala primeiro.");
         else refreshRoom();
     }
+    void onCloudUpload(CCObject*) {
+        if (!cgdof::net::hasSession()) {
+            setStatus("Entre com sua conta GD para salvar na nuvem.");
+            return;
+        }
+        auto content = m_chatInput ? std::string(m_chatInput->getString()) : "";
+        if (content.empty()) content = "Arquivo de teste do Complet GD Online For You!";
+        retain();
+        cgdof::net::uploadCloudText("nota-prototipo.txt", content,
+            [this](bool ok, matjson::Value, std::string error) {
+                setStatus(ok ? "Nota enviada para o armazenamento em nuvem." : "Upload: " + error.substr(0, 90));
+                release();
+            }
+        );
+    }
+
     void onBack(CCObject*) {
+        unschedule(schedule_selector(MainHubLayer::onPollRoom));
         CCDirector::sharedDirector()->popScene();
     }
 };
