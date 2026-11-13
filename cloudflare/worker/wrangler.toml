@@ -1,0 +1,24 @@
+name = "complet-gd-online-api"
+main = "src/index.js"
+compatibility_date = "2026-11-13"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ALLOWED_ORIGINS = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "complet-gd-online"
+database_id = "CREATE_D1_DATABASE_AND_PASTE_ID_HERE"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "complet-gd-files"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomHub"]
