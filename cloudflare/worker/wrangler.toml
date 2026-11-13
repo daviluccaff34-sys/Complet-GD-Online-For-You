@@ -22,3 +22,11 @@ class_name = "RoomHub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomHub"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+  [observability.traces]
+  enabled = true
+  head_sampling_rate = 0.01
