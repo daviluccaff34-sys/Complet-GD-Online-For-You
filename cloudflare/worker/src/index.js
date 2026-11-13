@@ -1,3 +1,5 @@
+import { DurableObject } from "cloudflare:workers";
+
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const MAX_CHAT_CHARS = 4000;
 const MAX_ROOM_MESSAGE = 64 * 1024;
@@ -183,120 +185,75 @@ async function storageList(env, player) {
   return json({ files: result.results || [] });
 }
 
-export class RoomHub {
-  constructor(state, env) {
-    this.state = state;
-    this.env = env;
-    this.clients = new Map();
+export class RoomHub extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
   }
-  async fetch(request) {
-    const url = new URL(request.url);
-    const player = {
-      playerId: request.headers.get("x-player-id") || "",
-      username: request.headers.get("x-player-name") || "Player"
+
+  async getRoomState(player, since = 0) {
+    const now = Date.now();
+    const presence = (await this.ctx.storage.get("presence")) || {};
+    presence[player.playerId] = { ...player, seenAt: now };
+    for (const [id, member] of Object.entries(presence)) {
+      if (now - member.seenAt > 30_000) delete presence[id];
+    }
+    await this.ctx.storage.put("presence", presence);
+    const levelState = (await this.ctx.storage.get("levelState")) || { objects: [], revision: 0 };
+    const events = (await this.ctx.storage.get("events")) || [];
+    return {
+      state: levelState,
+      revision: levelState.revision || 0,
+      members: Object.values(presence),
+      events: events.filter(event => event.revision > Math.max(0, Number(since) || 0)).slice(-200)
     };
-    if (!player.playerId) return new Response("Unauthorized", { status: 401 });
-
-    if (url.pathname === "/state" && request.method === "GET") {
-      const now = Date.now();
-      const presence = (await this.state.storage.get("presence")) || {};
-      presence[player.playerId] = { ...player, seenAt: now };
-      for (const [id, member] of Object.entries(presence)) if (now - member.seenAt > 30_000) delete presence[id];
-      await this.state.storage.put("presence", presence);
-      const levelState = (await this.state.storage.get("levelState")) || { objects: [], revision: 0 };
-      const events = (await this.state.storage.get("events")) || [];
-      const since = Math.max(0, Number(url.searchParams.get("since") || 0));
-      return Response.json({
-        state: levelState,
-        revision: levelState.revision || 0,
-        members: Object.values(presence),
-        events: events.filter(event => event.revision > since).slice(-200)
-      });
-    }
-
-    if (url.pathname === "/events" && request.method === "POST") {
-      const raw = await request.text();
-      if (raw.length > MAX_ROOM_MESSAGE) return new Response("Message too large", { status: 413 });
-      let message;
-      try { message = JSON.parse(raw); } catch { return new Response("Invalid JSON", { status: 400 }); }
-      if (!message || !["chat", "level_operation"].includes(message.type)) return new Response("Invalid event", { status: 400 });
-      const events = (await this.state.storage.get("events")) || [];
-      const levelState = (await this.state.storage.get("levelState")) || { objects: [], revision: 0 };
-      const event = { ...message, player, at: Date.now(), revision: Number(levelState.revision || 0) + 1 };
-      if (message.type === "chat") event.text = String(message.text || "").trim().slice(0, 500);
-      if (message.type === "level_operation") {
-        const op = message.operation;
-        if (!op || !["add", "update", "delete"].includes(op.action)) return new Response("Invalid operation", { status: 400 });
-        if (op.action === "add" && levelState.objects.length < 20_000) levelState.objects.push(op.object);
-        if (op.action === "update") {
-          const index = levelState.objects.findIndex(x => x && x.id === op.id);
-          if (index >= 0) levelState.objects[index] = op.object;
-        }
-        if (op.action === "delete") levelState.objects = levelState.objects.filter(x => x && x.id !== op.id);
-        levelState.revision = event.revision;
-        await this.state.storage.put("levelState", levelState);
-      } else {
-        levelState.revision = event.revision;
-        await this.state.storage.put("levelState", levelState);
-      }
-      events.push(event);
-      await this.state.storage.put("events", events.slice(-1000));
-      this.broadcast(event);
-      return Response.json({ ok: true, revision: event.revision });
-    }
-
-    if (request.headers.get("Upgrade") !== "websocket") return new Response("WebSocket required", { status: 426 });
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-    server.accept();
-    this.clients.set(server, player);
-    server.addEventListener("message", event => this.onMessage(server, event.data));
-    server.addEventListener("close", () => this.clients.delete(server));
-    server.addEventListener("error", () => this.clients.delete(server));
-    server.send(JSON.stringify({ type: "welcome", player, members: [...this.clients.values()] }));
-    this.broadcast({ type: "presence", members: [...this.clients.values()] }, server);
-    const saved = await this.state.storage.get("levelState");
-    if (saved) server.send(JSON.stringify({ type: "level_snapshot", state: saved }));
-    return new Response(null, { status: 101, webSocket: client });
   }
-  async onMessage(sender, raw) {
-    if (typeof raw !== "string" || raw.length > MAX_ROOM_MESSAGE) return;
-    let message;
-    try { message = JSON.parse(raw); } catch { return; }
-    const player = this.clients.get(sender);
-    if (!player || !message || typeof message.type !== "string") return;
-    if (message.type === "ping") {
-      sender.send(JSON.stringify({ type: "pong", at: Date.now() }));
-      return;
+
+  async postRoomEvent(player, message) {
+    if (!message || !["chat", "level_operation"].includes(message.type)) {
+      throw new Error("INVALID_ROOM_EVENT");
     }
-    if (message.type === "level_operation") {
-      const operation = message.operation;
-      if (!operation || typeof operation !== "object" || !["add", "update", "delete"].includes(operation.action)) return;
-      // The prototype broadcasts operations and persists the latest shared state.
-      // A production editor must translate/validate every GD object field before accepting it.
-      const state = (await this.state.storage.get("levelState")) || { objects: [], revision: 0 };
-      if (operation.action === "add" && state.objects.length < 20_000) state.objects.push(operation.object);
-      if (operation.action === "update") {
-        const index = state.objects.findIndex(x => x && x.id === operation.id);
-        if (index >= 0) state.objects[index] = operation.object;
-      }
-      if (operation.action === "delete") state.objects = state.objects.filter(x => x && x.id !== operation.id);
-      state.revision = Number(state.revision || 0) + 1;
-      await this.state.storage.put("levelState", state);
-      this.broadcast({ type: "level_operation", player, operation, revision: state.revision });
-      return;
-    }
+    const events = (await this.ctx.storage.get("events")) || [];
+    const levelState = (await this.ctx.storage.get("levelState")) || { objects: [], revision: 0 };
+    const event = {
+      type: message.type,
+      player,
+      at: Date.now(),
+      revision: Number(levelState.revision || 0) + 1
+    };
+
     if (message.type === "chat") {
-      const text = String(message.text || "").trim().slice(0, 500);
-      if (text) this.broadcast({ type: "chat", player, text, at: Date.now() });
+      event.text = String(message.text || "").trim().slice(0, 500);
+      if (!event.text) throw new Error("EMPTY_CHAT_MESSAGE");
+    } else {
+      const operation = message.operation;
+      if (!operation || !["add", "update", "delete"].includes(operation.action)) {
+        throw new Error("INVALID_LEVEL_OPERATION");
+      }
+      if (operation.action === "add") {
+        if (!operation.object || typeof operation.object !== "object" || Array.isArray(operation.object)) {
+          throw new Error("INVALID_LEVEL_OBJECT");
+        }
+        if (levelState.objects.length >= 20_000) throw new Error("ROOM_OBJECT_LIMIT");
+        levelState.objects.push(operation.object);
+      }
+      if (operation.action === "update") {
+        const index = levelState.objects.findIndex(x => x && x.id === operation.id);
+        if (index < 0 || !operation.object || typeof operation.object !== "object") {
+          throw new Error("LEVEL_OBJECT_NOT_FOUND");
+        }
+        levelState.objects[index] = operation.object;
+      }
+      if (operation.action === "delete") {
+        levelState.objects = levelState.objects.filter(x => x && x.id !== operation.id);
+      }
+      event.operation = operation;
     }
-  }
-  broadcast(message, except = null) {
-    const payload = JSON.stringify(message);
-    for (const socket of this.clients.keys()) {
-      if (socket === except) continue;
-      try { socket.send(payload); } catch { this.clients.delete(socket); }
-    }
+
+    levelState.revision = event.revision;
+    events.push(event);
+    await this.ctx.storage.put("levelState", levelState);
+    await this.ctx.storage.put("events", events.slice(-1000));
+    return { ok: true, revision: event.revision };
   }
 }
 
@@ -322,17 +279,20 @@ export default {
           const parts = path.split("/");
           const roomId = parts[3];
           const action = parts[4];
-          if (!/^[A-Za-z0-9_-]{4,32}$/.test(roomId || "") || !["connect", "state", "events"].includes(action)) {
+          if (!/^[A-Za-z0-9_-]{4,32}$/.test(roomId || "") || !["state", "events"].includes(action)) {
             response = json({ error: "Código de sala ou ação inválida." }, 400);
           } else {
-            const id = env.ROOMS.idFromName(roomId);
-            const stub = env.ROOMS.get(id);
-            const target = action === "connect" ? "connect" : action;
-            const forwarded = new Request("https://room.internal/" + target + url.search, request);
-            const headers = new Headers(forwarded.headers);
-            headers.set("x-player-id", player.player_id);
-            headers.set("x-player-name", player.username || "Player");
-            response = await stub.fetch(new Request(forwarded, { headers }));
+            const stub = env.ROOMS.getByName(roomId);
+            const identity = { playerId: player.player_id, username: player.username || "Player" };
+            if (action === "state" && request.method === "GET") {
+              const since = Math.max(0, Number(url.searchParams.get("since") || 0));
+              response = json(await stub.getRoomState(identity, since));
+            } else if (action === "events" && request.method === "POST") {
+              const event = await bodyJson(request, MAX_ROOM_MESSAGE);
+              response = json(await stub.postRoomEvent(identity, event));
+            } else {
+              response = json({ error: "Método não permitido." }, 405);
+            }
           }
         } else if (path === "/api/storage/files" && request.method === "GET") response = await storageList(env, player);
         else if (path === "/api/storage/upload" && request.method === "POST") response = await storageUpload(request, env, player);
