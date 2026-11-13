@@ -248,7 +248,7 @@ public:
         addButton("PERGUNTAR IA", mid, size.height * 0.055f, menu_selector(MainHubLayer::onAskAI));
         addButton("NUVEM", right, size.height * 0.055f, menu_selector(MainHubLayer::onCloud));
         addButton("SALVAR NOTA", left, size.height * 0.055f, menu_selector(MainHubLayer::onCloudUpload));
-        addButton("VOLTAR", left, size.height * 0.055f, menu_selector(MainHubLayer::onBack));
+        addButton("VOLTAR", mid, size.height * 0.025f, menu_selector(MainHubLayer::onBack));
         return true;
     }
 
