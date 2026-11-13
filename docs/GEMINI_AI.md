@@ -41,9 +41,26 @@ Every endpoint must derive the player identity from a verified session/token. It
 
 Conversation and message queries must always be scoped to the authenticated player. Apply message length limits, rate limits, safe error handling, and retention limits before public launch.
 
+## Geometry Dash account authentication
+
+The selected account identity is the player's existing Geometry Dash account. The mod should integrate the Argon authentication library from Globed rather than asking the player to type their Geometry Dash password into this project's UI or sending a password/GJP to the project's Cloudflare services.
+
+Proposed flow:
+
+1. The mod starts Argon authentication using the supported library flow.
+2. The mod receives the Argon authentication token and the associated Geometry Dash account ID from the authentication result.
+3. The mod sends the token to the project's Cloudflare Worker over HTTPS.
+4. The Worker validates the token against the Argon validation API and confirms it matches the supplied account ID.
+5. Only after successful validation, the Worker maps the account ID to an internal player record and issues a short-lived project session.
+6. The Worker stores conversations under that internal player record. The raw Argon token must not be stored in D1 or logs.
+
+The Worker must never trust an account ID on its own. Every session must be bound to a validated Geometry Dash account, and every conversation query must be scoped to that session. If Argon validation is unavailable, sign-in must fail closed rather than silently accepting an unverified ID.
+
+This is a proposed integration, not yet implemented. Before coding, review Argon's current Android/Geode integration instructions, license, token lifecycle, and server validation contract.
+
 ## Decisions still required
 
-- Player sign-in/account identity and session issuance.
+- Exact Gemini model and API version.
 - Exact Gemini model and API version.
 - Whether the player can clear individual conversations or all history.
 - Usage limits and handling when Gemini is unavailable.
