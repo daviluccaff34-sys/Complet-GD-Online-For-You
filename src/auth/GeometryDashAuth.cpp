@@ -1,6 +1,7 @@
 #include "GeometryDashAuth.hpp"
 
 #include <argon/argon.hpp>
+#include <utility>
 
 namespace cgdof::auth {
 
