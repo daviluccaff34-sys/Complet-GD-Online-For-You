@@ -84,7 +84,7 @@ async function authenticateArgon(request, env) {
   const expires = now + 7 * 24 * 60 * 60 * 1000;
   await env.DB.prepare(
     "INSERT INTO players (id, account_id, username, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET username=excluded.username, updated_at=excluded.updated_at"
-  ).bind(crypto.randomUUID(), accountId, String(validation.username || body.username || "Player").slice(0, 32), now, now).run();
+  ).bind(crypto.randomUUID(), accountId, String(validation.username || "GD Player").slice(0, 32), now, now).run();
   const player = await env.DB.prepare("SELECT id, account_id, username FROM players WHERE account_id=?").bind(accountId).first();
   await env.DB.prepare("INSERT INTO sessions (token_hash, player_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
     .bind(tokenHash, player.id, expires, now).run();
@@ -248,11 +248,6 @@ export class RoomHub {
     if (request.headers.get("Upgrade") !== "websocket") return new Response("WebSocket required", { status: 426 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    const player = {
-      playerId: request.headers.get("x-player-id") || "",
-      username: request.headers.get("x-player-name") || "Player"
-    };
-    if (!player.playerId) return new Response("Unauthorized", { status: 401 });
     server.accept();
     this.clients.set(server, player);
     server.addEventListener("message", event => this.onMessage(server, event.data));
