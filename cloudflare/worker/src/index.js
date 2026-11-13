@@ -190,6 +190,61 @@ export class RoomHub {
     this.clients = new Map();
   }
   async fetch(request) {
+    const url = new URL(request.url);
+    const player = {
+      playerId: request.headers.get("x-player-id") || "",
+      username: request.headers.get("x-player-name") || "Player"
+    };
+    if (!player.playerId) return new Response("Unauthorized", { status: 401 });
+
+    if (url.pathname === "/state" && request.method === "GET") {
+      const now = Date.now();
+      const presence = (await this.state.storage.get("presence")) || {};
+      presence[player.playerId] = { ...player, seenAt: now };
+      for (const [id, member] of Object.entries(presence)) if (now - member.seenAt > 30_000) delete presence[id];
+      await this.state.storage.put("presence", presence);
+      const levelState = (await this.state.storage.get("levelState")) || { objects: [], revision: 0 };
+      const events = (await this.state.storage.get("events")) || [];
+      const since = Math.max(0, Number(url.searchParams.get("since") || 0));
+      return Response.json({
+        state: levelState,
+        revision: levelState.revision || 0,
+        members: Object.values(presence),
+        events: events.filter(event => event.revision > since).slice(-200)
+      });
+    }
+
+    if (url.pathname === "/events" && request.method === "POST") {
+      const raw = await request.text();
+      if (raw.length > MAX_ROOM_MESSAGE) return new Response("Message too large", { status: 413 });
+      let message;
+      try { message = JSON.parse(raw); } catch { return new Response("Invalid JSON", { status: 400 }); }
+      if (!message || !["chat", "level_operation"].includes(message.type)) return new Response("Invalid event", { status: 400 });
+      const events = (await this.state.storage.get("events")) || [];
+      const levelState = (await this.state.storage.get("levelState")) || { objects: [], revision: 0 };
+      const event = { ...message, player, at: Date.now(), revision: Number(levelState.revision || 0) + 1 };
+      if (message.type === "chat") event.text = String(message.text || "").trim().slice(0, 500);
+      if (message.type === "level_operation") {
+        const op = message.operation;
+        if (!op || !["add", "update", "delete"].includes(op.action)) return new Response("Invalid operation", { status: 400 });
+        if (op.action === "add" && levelState.objects.length < 20_000) levelState.objects.push(op.object);
+        if (op.action === "update") {
+          const index = levelState.objects.findIndex(x => x && x.id === op.id);
+          if (index >= 0) levelState.objects[index] = op.object;
+        }
+        if (op.action === "delete") levelState.objects = levelState.objects.filter(x => x && x.id !== op.id);
+        levelState.revision = event.revision;
+        await this.state.storage.put("levelState", levelState);
+      } else {
+        levelState.revision = event.revision;
+        await this.state.storage.put("levelState", levelState);
+      }
+      events.push(event);
+      await this.state.storage.put("events", events.slice(-1000));
+      this.broadcast(event);
+      return Response.json({ ok: true, revision: event.revision });
+    }
+
     if (request.headers.get("Upgrade") !== "websocket") return new Response("WebSocket required", { status: 426 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -268,19 +323,25 @@ export default {
         else if (path === "/api/rooms" && request.method === "POST") {
           const roomId = randomToken(6).toUpperCase().replaceAll("_", "A").replaceAll("-", "B").slice(0, 8);
           response = json({ roomId });
-        } else if (path.startsWith("/api/rooms/") && path.endsWith("/connect") && request.method === "GET") {
-          if (request.headers.get("Upgrade") !== "websocket") response = new Response("WebSocket required", { status: 426 });
-          else {
-            const roomId = path.split("/")[3];
-            if (!/^[A-Za-z0-9_-]{4,32}$/.test(roomId)) response = json({ error: "Código de sala inválido." }, 400);
-            else {
-              const id = env.ROOMS.idFromName(roomId);
-              const stub = env.ROOMS.get(id);
-              const headers = new Headers(request.headers);
-              headers.set("x-player-id", player.player_id);
-              headers.set("x-player-name", player.username || "Player");
-              response = await stub.fetch(new Request("https://room.internal/connect", { headers, method: "GET" }));
-            }
+        } else if (path.startsWith("/api/rooms/")) {
+          const parts = path.split("/");
+          const roomId = parts[3];
+          const action = parts[4];
+          if (!/^[A-Za-z0-9_-]{4,32}$/.test(roomId || "") || !["connect", "state", "events"].includes(action)) {
+            response = json({ error: "Código de sala ou ação inválida." }, 400);
+          } else {
+            const id = env.ROOMS.idFromName(roomId);
+            const stub = env.ROOMS.get(id);
+            const headers = new Headers(request.headers);
+            headers.set("x-player-id", player.player_id);
+            headers.set("x-player-name", player.username || "Player");
+            const target = action === "connect" ? "connect" : action;
+            const forwarded = new Request("https://room.internal/" + target + url.search, {
+              method: request.method,
+              headers,
+              body: request.method === "POST" ? request.body : undefined
+            });
+            response = await stub.fetch(forwarded);
           }
         } else if (path === "/api/storage/files" && request.method === "GET") response = await storageList(env, player);
         else if (path === "/api/storage/upload" && request.method === "POST") response = await storageUpload(request, env, player);
