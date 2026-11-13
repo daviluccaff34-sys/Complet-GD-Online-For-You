@@ -93,13 +93,13 @@ If the project later needs the canonical Geometry Dash username and user ID, rev
 - Do not include tokens in logs, analytics, error reports, or client-visible messages.
 - Use HTTPS for all requests and fail closed if validation cannot be completed.
 
-### CMake integration gate
+### Remaining integration checks
 
-Do not change the root `CMakeLists.txt` yet. Before adding the Argon dependency, verify that the selected Geode SDK / project template provides `CPMAddPackage` and that the pinned Argon release supports the project's Android ABI and selected Geode toolchain. Then add the dependency and link target in a dedicated reviewed commit.
+The dependency declaration is now committed, but the exact Argon 1.5.1 tag has not yet been independently fetched for source-by-source review, and no Android configure/build has been run. Confirm the dependency resolves to the intended release and supports the selected Android ABI before treating the integration as build-verified.
 
 ### Current status
 
-This is an upstream-documentation review and architecture update only. Argon has not yet been added to the project's CMake configuration, no authentication UI or C++ integration has been written, and nothing has been compiled or tested on Android.
+Argon is now declared and linked in the root CMake configuration. No authentication UI, C++ login flow, Cloudflare Worker, D1 database, or Gemini API request has been implemented. Nothing has been configured, compiled, or tested on Android.
 
 
 ## Verified Geode / Argon build integration
@@ -130,4 +130,4 @@ Argon's server API documents `POST /v1/validation/check-data-many`, which accept
 
 ## Implementation status
 
-Architecture only. No Worker, D1 database, Gemini API request, authentication, or mod chat UI has been implemented or tested yet. Do not treat this document as a deployed service.
+Architecture and dependency configuration only. The Argon CMake dependency is committed, but authentication, Worker, D1, Gemini requests, and chat UI are not implemented. Nothing has been built or deployed.
