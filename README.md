@@ -20,7 +20,7 @@ A Geode mod for Geometry Dash, developed first for Android 64-bit.
 
 ## Important prototype boundaries
 
-The shared editor currently sends and stores generic JSON marker objects. It is not yet connected to Geometry Dash's native level editor or native object serialization. The room client currently uses authenticated HTTP polling/actions rather than a persistent native WebSocket connection. Cloud file listing exists; upload UI and file download/delete UI are still pending.
+The shared editor currently sends and stores generic JSON marker objects. It is not yet connected to Geometry Dash's native level editor or native object serialization. The room client currently uses authenticated HTTP polling every two seconds rather than a persistent native WebSocket connection. The hub includes room chat, a shared-marker operation, cloud file listing and a text-note upload; native GD level serialization plus file download/delete UI are still pending.
 
 The Worker must be deployed and its D1/R2/Durable Object resources created before online features can work. After deployment, replace `API_BASE` in `src/net/ApiClient.hpp` with the exact workers.dev URL. Add `GEMINI_API_KEY` as a Cloudflare secret. Never put that key in the mod or this repository.
 
