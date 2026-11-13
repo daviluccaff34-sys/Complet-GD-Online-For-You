@@ -130,4 +130,4 @@ Argon's server API documents `POST /v1/validation/check-data-many`, which accept
 
 ## Implementation status
 
-Architecture and dependency configuration only. The Argon CMake dependency is committed, but authentication, Worker, D1, Gemini requests, and chat UI are not implemented. Nothing has been built or deployed.
+The Argon CMake dependency and an initial C++ authentication wrapper are committed. The wrapper is not connected to a UI and does not call the Worker yet. Worker, D1, Gemini requests, and chat UI are not implemented. Nothing has been configured, compiled, or deployed.
