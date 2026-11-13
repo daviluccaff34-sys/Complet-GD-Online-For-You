@@ -43,7 +43,7 @@ All endpoints except health and Argon sign-in require a valid project session. P
 
 ## Gemini
 
-The Worker calls Gemini's gemini-2.5-flash generateContent endpoint. Set GEMINI_API_KEY as a Cloudflare Worker secret; never put it in mod.json, C++, GitHub Actions logs or the public repository. The prompt asks the assistant to speak naturally, prefer the player's language, explain GD concepts step by step and admit uncertainty.
+The Worker calls Gemini's gemini-3.8-flash generateContent endpoint. Set GEMINI_API_KEY as a Cloudflare Worker secret; never put it in mod.json, C++, GitHub Actions logs or the public repository. The prompt asks the assistant to speak naturally, prefer the player's language, explain GD concepts step by step and admit uncertainty.
 
 The initial client UI keeps one conversation ID in memory while the hub remains open. D1 stores the conversation and message history. Conversation listing and retrieval endpoints exist for the next history-screen iteration.
 
