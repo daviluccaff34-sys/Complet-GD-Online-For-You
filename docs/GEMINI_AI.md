@@ -51,14 +51,14 @@ The initial client UI keeps one conversation ID in memory while the hub remains 
 
 - Workers: API and Gemini proxy.
 - D1: player records, hashed sessions, conversations, messages and file metadata.
-- Durable Objects: per-room state, member presence, event revisions and shared editor-operation transport.
+- Durable Objects: per-room state, member presence, event revisions and shared editor-operation transport through RPC methods.
 - R2: private per-player file objects.
 
 The Worker enforces a 100 MB application upload limit. The initial UI uploads a text note as a smoke-test path; native level-file import/export, download and deletion are not implemented yet.
 
 ## Prototype boundaries and next work
 
-- Room communication uses authenticated HTTP polling every two seconds. A persistent native WebSocket client is not connected yet.
+- Room communication uses authenticated HTTP polling every two seconds. The Worker invokes the Durable Object through current RPC methods; a persistent native WebSocket client is not connected yet.
 - The shared editor stores generic JSON marker objects; it is not integrated with Geometry Dash's native editor object model or level serialization.
 - The prototype does not synchronize actual live player movement or gameplay state.
 - Add room invite permissions, ownership, moderation, rate limits, quotas and stronger validation before public launch.
