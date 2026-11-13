@@ -65,6 +65,42 @@ This is a proposed integration, not yet implemented. Before coding, review Argon
 - Whether the player can clear individual conversations or all history.
 - Usage limits and handling when Gemini is unavailable.
 
+
+## Argon Android / Geode integration review
+
+The official Argon client is a C++ library intended to be linked into the Geode mod; users do not need to install a separate dependency mod. The upstream README currently documents this CMake dependency:
+
+```cmake
+CPMAddPackage("gh:GlobedGD/argon@1.5.1")
+target_link_libraries(${PROJECT_NAME} argon)
+```
+
+The client authentication entry point is `argon::startAuth()`, which resolves asynchronously to a `Result<std::string>` containing the Argon auth token. In Geode, the documented pattern uses `async::spawn` or an `async::TaskHolder`; do not block the game thread while authentication is running. Include `<argon/argon.hpp>`. If token/session validation fails, Argon documents `argon::clearToken()` as the recovery action before retrying authentication.
+
+### Server validation
+
+The Cloudflare Worker must validate the received token with the official Argon server at `https://argon.globed.dev/v1`. The basic endpoint is `GET /validation/check`, with `account_id` and `authtoken`; accept sign-in only when the HTTP status is successful and the JSON field `valid` is exactly true. Treat non-200 responses, rate limits, malformed JSON, timeouts, and unavailable Argon service as authentication failures. Never log the token, the full validation URL, or request bodies containing it.
+
+If the project later needs the canonical Geometry Dash username and user ID, review Argon's `POST /validation/check-data-many` endpoint; its response includes the account ID, user ID, and username embedded in the validated token. Do not trust a username or user ID supplied only by the mod client.
+
+### Session and privacy rules
+
+- After successful Argon validation, issue the project's own short-lived session token.
+- Store only the validated account identity and the project's session data in D1; do not persist the Argon token.
+- Store a hash of the project's session token rather than its raw value where practical.
+- Revalidate only when needed; use the project's own session to avoid calling Argon on every chat request.
+- Never accept a player/account ID as proof of identity without a valid project session.
+- Do not include tokens in logs, analytics, error reports, or client-visible messages.
+- Use HTTPS for all requests and fail closed if validation cannot be completed.
+
+### CMake integration gate
+
+Do not change the root `CMakeLists.txt` yet. Before adding the Argon dependency, verify that the selected Geode SDK / project template provides `CPMAddPackage` and that the pinned Argon release supports the project's Android ABI and selected Geode toolchain. Then add the dependency and link target in a dedicated reviewed commit.
+
+### Current status
+
+This is an upstream-documentation review and architecture update only. Argon has not yet been added to the project's CMake configuration, no authentication UI or C++ integration has been written, and nothing has been compiled or tested on Android.
+
 ## Implementation status
 
 Architecture only. No Worker, D1 database, Gemini API request, authentication, or mod chat UI has been implemented or tested yet. Do not treat this document as a deployed service.
