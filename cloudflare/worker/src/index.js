@@ -13,7 +13,7 @@ function cors(request, env) {
   return {
     "access-control-allow-origin": allowOrigin,
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type",
+    "access-control-allow-headers": "authorization,content-type,x-file-name",
     "access-control-max-age": "86400",
     "vary": "Origin"
   };
@@ -122,14 +122,14 @@ async function aiChat(request, env, player) {
   let answer = "";
   try {
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
       {
         method: "POST",
         headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: [...history, { role: "user", parts: [{ text: message }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 1200 }
+          generationConfig: { maxOutputTokens: 1200 }
         }),
         signal: AbortSignal.timeout(30_000)
       }
@@ -327,16 +327,12 @@ export default {
           } else {
             const id = env.ROOMS.idFromName(roomId);
             const stub = env.ROOMS.get(id);
-            const headers = new Headers(request.headers);
+            const target = action === "connect" ? "connect" : action;
+            const forwarded = new Request("https://room.internal/" + target + url.search, request);
+            const headers = new Headers(forwarded.headers);
             headers.set("x-player-id", player.player_id);
             headers.set("x-player-name", player.username || "Player");
-            const target = action === "connect" ? "connect" : action;
-            const forwarded = new Request("https://room.internal/" + target + url.search, {
-              method: request.method,
-              headers,
-              body: request.method === "POST" ? request.body : undefined
-            });
-            response = await stub.fetch(forwarded);
+            response = await stub.fetch(new Request(forwarded, { headers }));
           }
         } else if (path === "/api/storage/files" && request.method === "GET") response = await storageList(env, player);
         else if (path === "/api/storage/upload" && request.method === "POST") response = await storageUpload(request, env, player);
