@@ -135,4 +135,17 @@ void listCloudFiles(ApiCallback callback) {
     );
 }
 
+void uploadCloudText(std::string fileName, std::string content, ApiCallback callback) {
+    auto request = authorizedRequest();
+    request.header("x-file-name", std::move(fileName));
+    request.header("content-type", "text/plain; charset=utf-8");
+    request.bodyString(content);
+    async::spawn(
+        request.post(url("/api/storage/upload")),
+        [callback = std::move(callback)](web::WebResponse response) mutable {
+            parseResponse(std::move(response), std::move(callback));
+        }
+    );
+}
+
 } // namespace cgdof::net
